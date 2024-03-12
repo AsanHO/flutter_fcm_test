@@ -2,19 +2,99 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_fcm_test/firebase_options.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-void main() async{
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  final fcmToken = await FirebaseMessaging.instance.getToken();
-  print(fcmToken);
-  await FirebaseMessaging.instance.setAutoInitEnabled(true);
-  FirebaseMessaging.onMessage.listen((event) {print(event.notification!.body!); });
-  runApp(const MyApp());
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  print('Handling a background message ${message.messageId}');
 }
 
-class MyApp extends StatelessWidget {
+/// 변수
+late AndroidNotificationChannel channel;
+late FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin;
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  /// 알림을 보낼 기기의 토큰값. firebase console에서 등록
+  String? token = await FirebaseMessaging.instance.getToken();
+
+  channel = const AndroidNotificationChannel(
+    'high_importance_channel', // id
+    'High Importance Notifications', // title
+    description:
+        'This channel is used for important notifications.', // description
+    importance: Importance.high,
+  );
+
+  var initialzationSettingsAndroid =
+      const AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  var initializationSettings = InitializationSettings(
+    android: initialzationSettingsAndroid,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+  );
+
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
+
+  runApp(const MaterialApp(home: MyApp()));
+}
+
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      RemoteNotification? notification = message.notification;
+      AndroidNotification? android = message.notification?.android;
+      var androidNotiDetails = AndroidNotificationDetails(
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+      );
+      // var iOSNotiDetails = const IOSNotificationDetails();
+      var details = NotificationDetails(
+        android: androidNotiDetails,
+      );
+      if (notification != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          details,
+        );
+      }
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      print('FirebaseMessaging ::: $message');
+    });
+
+    super.initState();
+  }
 
   // This widget is the root of your application.
   @override
